@@ -2,6 +2,8 @@ Attribute VB_Name = "SaveWordAsPDF"
 
 Sub ConvertMultipleWordToPDF()
 
+'Compiled November, 2020
+
 'This sub converts MS Word files (.docx) in the input folder specified (in "OpenSourceFolder"/"SelectedWordFilesFolder") to PDF, saving the PDF files in the output folder specified (in "OpenTargetFolder"/"SelectedPdfFilesFolder")
 
 'The .xlsm file contains only a single tab with a button to execute sub (placed in cells B2:D3); output from the sub is recorded as stats in cells B5:B7
