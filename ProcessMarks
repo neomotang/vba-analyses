@@ -1,0 +1,183 @@
+Sub LoopThroughMarks()
+
+'This sub works through the files in the folder specified (in "saveLocation"), does some quality checks to verify student details entered, and then captures the marks on the classlist
+
+'zMaster.xlsm is the main classlist file where marks will be recorded; it contains the following two tabs:
+'   "Main" - starting tab with prompts and outputs from code execution; a button executes sub "ChooseFolderPath" (output as file path in cell F8), and another button executes sub "LoopThroughMarks" (output as stats in F15:H17)
+'   "Task" - classlist with the following columns: Student number (A), Surname (B), Initials (C), Group (D), Practical (E), Report mark (F), Penalties (G), Final mark after penalties (H), Mark addition check (I), Graduate attribute 4 assessment (J), Graduate attribute 6 assessment (K), and Processing status (L)
+'       The code below assumes the first two rows on "Task" have headings, and student details are between rows 3 and 90
+
+'The individual student marksheet files have this filename structure: "SUBJECT SURNAME INITIALS 01234567.xlsx", where 01234567 is the student number
+'   Some files may also be saved with this structure: "SUBJECT_SURNAME.xlsx"
+'   Cell references for content that will be accessed: Student number (C5), Report mark (H4), Penalties (H5), Final mark after penalties (H6), Graduate attribute 4 assessment (G24), and Graduate attribute 6 assessment (G33)
+'   The graduate attribute assessments are retrieved as statements (Satisfied (P), Marginally Satisfied(PM), Marginally Not Satisfied(FM), Not Satisfied (F)) and later converted to just symbols (P, PM, FM, F) in the private function "RetrieveMarks"
+
+
+Dim clSN, currentFile, fnErrFiles, fnSN, GA4, GA4letter, GA6, GA6letter, msErrFiles, msSN, saveLocation, SurNm As String
+Dim dashPos, FinalM, FNErrCount, i, MSErrCount, Penalties, ReportM, stRow, SuccessCount As Integer
+Dim fnMatch, snMatch As Range
+Dim MarkVector As New Collection
+ 
+Application.ScreenUpdating = False 'Stops the screen from flashing while the files are being processed
+
+fnErrFiles = "" 'string that will hold the file names that caused "file name errors", where the student number in the file name does not match any in the classlist
+msErrFiles = "" 'string that will hold the file names that caused "marksheet errors", where the student number in the file name and the marksheet do not match
+FNErrCount = 0 'counts the number of "file name errors"
+MSErrCount = 0 'counts the number of "mark sheet errors"
+SuccessCount = 0 'counts the number of marks successfully recorded
+
+Workbooks("zMaster.xlsm").Activate
+
+saveLocation = Sheets("Main").Range("F8").Value 'Reads off path of folder as previously chosen
+
+'Verify that a folder has been selected
+If saveLocation = "" Then
+    MsgBox "Please choose folder first!", vbCritical
+    Exit Sub
+    Else
+        currentFile = Dir(saveLocation)
+End If
+
+'For the selected folder, works through individual files in alphabetical order until the main classlist file "zMaster.xlsm" is reached
+Do While Len(currentFile) > 0
+    If currentFile = "zMaster.xlsm" Then
+        GoTo EndCode
+    End If
+    Application.DisplayAlerts = False
+    
+    fnSN = Left(Right(currentFile, 13), 8) 'extract student number from file name and then compare to classlist using "Set"; assumes file name structure "SUBJECT SURNAME INITIALS 01234567.xlsx"
+    Set fnMatch = Worksheets(2).Range("A3:A90").Find(fnSU, LookIn:=xlValues)
+    If fnMatch Is Nothing Then 'The true case caters for files with the file name structure "SUBJECT_SURNAME.xlsx"
+        dashPos = InStr(currentFile, "_")
+        SurNm = Left(Right(currentFile, Len(currentFile) - dashPos), Len(currentFile) - dashPos - 5) 'extract Surname from file name and then compare to classlist
+        Set snMatch = Worksheets(2).Range("B3:B90").Find(SurNm, LookIn:=xlValues)
+        If snMatch Is Nothing Then 'Record file name errors and add the relevant file names to a list
+            fnErrFiles = fnErrFiles & " " & currentFile & ";"
+            FNErrCount = FNErrCount + 1
+            Else
+                stRow = snMatch.Row 'record row number of student in classlist
+                clSN = Sheets("Task").Cells(stRow, 1).Value 'copy student number from classlist
+                Workbooks.Open (saveLocation & currentFile)  'opens specific student file
+                Sheets(1).Select
+                
+                msSN = Right(Sheets(1).Cells(5, 3).Value, 8) 'copy student number from student's marksheet file and compare to student's classlist entry on zMaster.xlsm
+                If Not (Str(clSN) = Str(msSN)) Then 'Record marksheet error and add the relevant file names to a list
+                    msErrFiles = msErrFiles & " " & currentFile & ";"
+                    MSErrCount = MSErrCount + 1
+                    Workbooks(currentFile).Activate  'switch active window to student file and then close it
+                    Workbooks(currentFile).Close
+                    Application.Wait (Now + TimeValue("0:00:01"))
+                    
+                    Else 'Surname from file name, student number from student's marksheet file, and surname and student number from zMaster.xlsm classlist are consistent; retrieve and record marks for the student
+                        Application.Wait (Now + TimeValue("0:00:01"))
+                        i = RetrieveMarks(MarkVector) 'Returns a vector with: report mark, penalties, final mark after penalties, GA4 symbol, GA6 symbol; see private function "RetrieveMarks" at the end
+                        Workbooks(currentFile).Close
+                        Workbooks("zMaster.xlsm").Activate
+                        Sheets("Task").Activate
+                        SuccessCount = SuccessCount + CaptureMarks(stRow, MarkVector(1), MarkVector(2), MarkVector(3), MarkVector(4), MarkVector(5)) 'Records the details in the Mark vector at the appropriate row for the current student and also tallies successful excecutions
+                        
+                        Application.Wait (Now + TimeValue("0:00:01"))
+                    End If
+            End If
+        
+        Else 'The false case caters for files with the file name structure "SUBJECT SURNAME INITIALS 01234567.xlsx"
+            stRow = fnMatch.Row 'record row number of student in classlist
+            Workbooks.Open (saveLocation & currentFile)  'opens specific student file
+            Sheets(1).Select
+            
+            msSN = Right(Sheets(1).Cells(5, 3).Value, 8) 'copy student number from student's marksheet file and compare to the student number in file name
+            If Not (fnSN = msSN) Then 'Record marksheet error and add the relevant file names to a list
+                msErrFiles = msErrFiles & " " & currentFile & ";"
+                MSErrCount = MSErrCount + 1
+                Workbooks(currentFile).Activate  'switch active window to student file and then close it
+                Workbooks(currentFile).Close
+                Application.Wait (Now + TimeValue("0:00:01"))
+                
+                Else 'Student number from file name, student number from student's marksheet file, and student number from zMaster.xlsm classlist are consistent; retrieve and record marks for the student
+                    Application.Wait (Now + TimeValue("0:00:01"))
+                    i = RetrieveMarks(MarkVector) 'Returns a vector with: report mark, penalties, final mark after penalties, GA4 symbol, GA6 symbol; see private function "RetrieveMarks" at the end
+                    Workbooks(currentFile).Close
+                    Workbooks("zMaster.xlsm").Activate
+                    Sheets("Task").Activate
+                    SuccessCount = SuccessCount + CaptureMarks(stRow, MarkVector(1), MarkVector(2), MarkVector(3), MarkVector(4), MarkVector(5)) 'Records the details in the Mark vector at the appropriate row for the current student and also tallies successful excecutions
+                                        
+                    Application.Wait (Now + TimeValue("0:00:01"))
+                End If
+        End If
+                
+    currentFile = Dir 'move on to next file in the folder
+Loop
+
+Application.Wait (Now + TimeValue("0:00:01"))
+Workbooks("zMaster.xlsm").Activate
+'Application.ScreenUpdating = True
+EndCode:
+    Sheets("Main").Activate
+    Sheets("Main").Range("B15").Value = "Number of files processed successfully:"
+    Sheets("Main").Range("F15").Value = SuccessCount
+    Sheets("Main").Range("B16").Value = "Number of file name errors:"
+    Sheets("Main").Range("F16").Value = FNErrCount
+    Sheets("Main").Range("H16").Value = fnErrFiles
+    Sheets("Main").Range("B17").Value = "Number of marksheet errors:"
+    Sheets("Main").Range("F17").Value = MSErrCount
+    Sheets("Main").Range("H17").Value = msErrFiles
+    Application.ScreenUpdating = True
+
+End Sub
+
+Private Function RetrieveMarks(ByVal vector As Collection)
+
+Dim GA4, GA4letter, GA6, GA6letter As String
+Dim FinalM, i, Penalties, ReportM As Integer
+
+i = vector.count
+Do While i > 0 'clears the mark result vector
+   vector.Remove (1)
+    i = i - 1
+    Loop
+
+ReportM = Sheets(1).Cells(4, 8).Value
+Penalties = Sheets(1).Cells(5, 8).Value
+FinalM = Sheets(1).Cells(6, 8).Value
+GA4 = Sheets(1).Cells(24, 7).Value
+If Len(GA4) = 13 Then
+    GA4letter = "P"
+    ElseIf Len(GA4) = 25 Then
+    GA4letter = "PM"
+    ElseIf Len(GA4) = 29 Then
+    GA4letter = "FM"
+    Else: GA4letter = "F"
+    End If
+GA6 = Sheets(1).Cells(33, 7).Value
+If Len(GA6) = 13 Then
+    GA6letter = "P"
+    ElseIf Len(GA6) = 25 Then
+    GA6letter = "PM"
+    ElseIf Len(GA6) = 29 Then
+    GA6letter = "FM"
+    Else: GA6letter = "F"
+    End If
+    
+'Populate the mark result vector for the current student
+vector.Add ReportM
+vector.Add Penalties
+vector.Add FinalM
+vector.Add GA4letter
+vector.Add GA6letter
+
+End Function
+
+Private Function CaptureMarks(ByVal fRow As Integer, ByVal fReportM As Integer, ByVal fPenalties As Integer, ByVal fFinalM As Integer, ByVal fGA4letter As String, ByVal fGA6letter As String) As Integer
+
+CaptureMarks = 0
+
+Sheets("Task").Activate
+Sheets("Task").Cells(fRow, 6).Value = fReportM
+Sheets("Task").Cells(fRow, 7).Value = fPenalties
+Sheets("Task").Cells(fRow, 8).Value = fFinalM
+Sheets("Task").Cells(fRow, 10).Value = fGA4letter
+Sheets("Task").Cells(fRow, 11).Value = fGA6letter
+Sheets("Task").Cells(fRow, 12).Value = "Done"
+CaptureMarks = 1 'result of the function if successfully executed is 1, which is added to the tally of successful executions
+
+End Function
